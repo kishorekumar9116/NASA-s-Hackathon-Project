@@ -57,3 +57,86 @@ plt.ylabel("Temperature (°C)")
 plt.legend()
 plt.title("Weather Prediction (Past + Future)")
 plt.show()
+from flask import Flask, jsonify, request
+import requests
+import pandas as pd
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from datetime import datetime, timedelta
+
+app = Flask(__name__)
+
+# ---------------------------
+# API CONFIG (Use OpenWeatherMap)
+# ---------------------------
+API_KEY = "YOUR_API_KEY"   # Replace with your OpenWeatherMap API key
+BASE_URL = "http://api.openweathermap.org/data/2.5/air_pollution/history"
+
+# ---------------------------
+# Fetch past 7 days AQI data
+# ---------------------------
+def fetch_air_quality(lat, lon):
+    end = int(datetime.now().timestamp())
+    start = int((datetime.now() - timedelta(days=7)).timestamp())
+    
+    url = f"{BASE_URL}?lat={lat}&lon={lon}&start={start}&end={end}&appid={API_KEY}"
+    response = requests.get(url).json()
+
+    if "list" not in response:
+        return None
+    
+    records = []
+    for item in response["list"]:
+        dt = datetime.utcfromtimestamp(item["dt"]).strftime("%Y-%m-%d")
+        aqi = item["main"]["aqi"]   # Air Quality Index
+        records.append({"date": dt, "aqi": aqi})
+    
+    return pd.DataFrame(records)
+
+# ---------------------------
+# Train Model + Predict Next 7 Days
+# ---------------------------
+def predict_future(df):
+    df["day_num"] = np.arange(len(df))  # Convert dates to numbers
+    X = df[["day_num"]]
+    y = df["aqi"]
+
+    model = LinearRegression()
+    model.fit(X, y)
+
+    # Predict next 7 days
+    future_days = np.arange(len(df), len(df)+7).reshape(-1,1)
+    predictions = model.predict(future_days)
+
+    future_dates = [(datetime.now() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(1,8)]
+    forecast = [{"date": d, "predicted_aqi": round(p, 2)} for d, p in zip(future_dates, predictions)]
+    
+    return forecast
+
+# ---------------------------
+# API ENDPOINT
+# ---------------------------
+@app.route("/air-quality", methods=["GET"])
+def air_quality():
+    lat = request.args.get("lat", "11.0168")  # Default: Coimbatore
+    lon = request.args.get("lon", "76.9558")
+
+    df = fetch_air_quality(lat, lon)
+    if df is None:
+        return jsonify({"error": "Could not fetch data"}), 400
+
+    forecast = predict_future(df)
+
+    result = {
+        "location": {"latitude": lat, "longitude": lon},
+        "past_week": df.to_dict(orient="records"),
+        "future_week": forecast
+    }
+    
+    return jsonify(result)
+
+# ---------------------------
+# Run Backend
+# ---------------------------
+if __name__ == "__main__":
+    app.run(debug=True)
