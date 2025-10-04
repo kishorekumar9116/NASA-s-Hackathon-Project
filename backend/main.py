@@ -57,6 +57,8 @@ plt.ylabel("Temperature (°C)")
 plt.legend()
 plt.title("Weather Prediction (Past + Future)")
 plt.show()
+#air quality backend
+import os   
 from flask import Flask, jsonify, request
 import requests
 import pandas as pd
